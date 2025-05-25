@@ -6,22 +6,29 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
+app.use(express.json());
 
 const DATA_FILE = "./data.json";
 let onlineUsers = new Map();
+let recentVisitors = new Map();
 
-// 한국 시간 기준 날짜/시간 키 반환
-function getTimeKeys() {
+function getTimeKeys30m() {
   const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const dateKey = now.toISOString().slice(0, 10);        // YYYY-MM-DD
-  const hourKey = now.toTimeString().slice(0, 2) + ":00"; // HH:00
+  const dateKey = now.toISOString().slice(0, 10);
+  const minutes = now.getMinutes() < 30 ? "00" : "30";
+  const hourKey = `${now.getHours().toString().padStart(2, '0')}:${minutes}`;
   return { dateKey, hourKey };
 }
 
-// 방문자/클릭수 업데이트
-async function updateCount(type) {
+async function updateCount(type, udd) {
   const data = await fs.readJson(DATA_FILE).catch(() => ({ visits: {}, clicks: {} }));
-  const { dateKey, hourKey } = getTimeKeys();
+  const { dateKey, hourKey } = getTimeKeys30m();
+  const uniqueKey = `${udd}_${dateKey}_${hourKey}`;
+
+  if (type === "visits") {
+    if (recentVisitors.has(uniqueKey)) return;
+    recentVisitors.set(uniqueKey, Date.now());
+  }
 
   if (!data[type]) data[type] = {};
   if (!data[type][dateKey]) data[type][dateKey] = {};
@@ -32,43 +39,51 @@ async function updateCount(type) {
   await fs.writeJson(DATA_FILE, data);
 }
 
-// 방문 기록
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, timestamp] of recentVisitors.entries()) {
+    if (now - timestamp > 30 * 60 * 1000) {
+      recentVisitors.delete(key);
+    }
+  }
+}, 5 * 60 * 1000);
+
 app.post("/api/visit", async (req, res) => {
-  await updateCount("visits");
+  const udd = req.body.udd;
+  if (!udd) return res.status(400).json({ success: false, error: "Missing udd" });
+  await updateCount("visits", udd);
   res.json({ success: true });
 });
 
-// 클릭 기록
 app.post("/api/click", async (req, res) => {
-  await updateCount("clicks");
+  const udd = req.body.udd;
+  if (!udd) return res.status(400).json({ success: false, error: "Missing udd" });
+  await updateCount("clicks", udd);
   res.json({ success: true });
 });
 
-// 통계 조회
-app.get("/api/stats", async (req, res) => {
-  const data = await fs.readJson(DATA_FILE).catch(() => ({ visits: {}, clicks: {} }));
-  res.json(data);
-});
-
-// 온라인 사용자 ping
 app.post("/api/online", (req, res) => {
-  const ip = req.headers["x-forwarded-for"] || req.connection.remoteAddress;
-  onlineUsers.set(ip, Date.now());
+  const udd = req.body.udd;
+  if (!udd) return res.status(400).json({ success: false, error: "Missing udd" });
+  onlineUsers.set(udd, Date.now());
   res.json({ success: true });
 });
 
-// 온라인 사용자 수 반환
 app.get("/api/online-count", (req, res) => {
   const now = Date.now();
-  for (const [ip, timestamp] of onlineUsers.entries()) {
-    if (now - timestamp > 60 * 1000) { // 1분 이상 활동 없으면 제거
-      onlineUsers.delete(ip);
+  for (const [udd, timestamp] of onlineUsers.entries()) {
+    if (now - timestamp > 60 * 1000) {
+      onlineUsers.delete(udd);
     }
   }
   res.json({ count: onlineUsers.size });
 });
 
+app.get("/api/stats", async (req, res) => {
+  const data = await fs.readJson(DATA_FILE).catch(() => ({ visits: {}, clicks: {} }));
+  res.json(data);
+});
+
 app.listen(PORT, () => {
   console.log(`서버 실행 중: http://localhost:${PORT}`);
 });
-  console.log("server.js 갱신 테스트");

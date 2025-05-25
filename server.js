@@ -21,7 +21,7 @@ function getTimeKeys30m() {
 }
 
 async function updateCount(type, udd) {
-  const data = await fs.readJson(DATA_FILE).catch(() => ({ visits: {}, clicks: {} }));
+  const data = await fs.readJson(DATA_FILE).catch(() => ({ visits: {}, clicks: {}, clickLogs: {} }));
   const { dateKey, hourKey } = getTimeKeys30m();
   const uniqueKey = `${udd}_${dateKey}_${hourKey}`;
 
@@ -35,6 +35,20 @@ async function updateCount(type, udd) {
   if (!data[type][dateKey][hourKey]) data[type][dateKey][hourKey] = 0;
 
   data[type][dateKey][hourKey] += 1;
+
+  await fs.writeJson(DATA_FILE, data);
+}
+
+async function logClickDetail(udd) {
+  const data = await fs.readJson(DATA_FILE).catch(() => ({ clickLogs: {} }));
+  const now = new Date(Date.now() + 9 * 60 * 60 * 1000); // KST
+  const dateKey = now.toISOString().slice(0, 10);
+  const time = now.toTimeString().slice(0, 8); // HH:MM:SS
+
+  if (!data.clickLogs) data.clickLogs = {};
+  if (!data.clickLogs[dateKey]) data.clickLogs[dateKey] = [];
+
+  data.clickLogs[dateKey].push({ time, udd });
 
   await fs.writeJson(DATA_FILE, data);
 }
@@ -59,6 +73,7 @@ app.post("/api/click", async (req, res) => {
   const udd = req.body.udd;
   if (!udd) return res.status(400).json({ success: false, error: "Missing udd" });
   await updateCount("clicks", udd);
+  await logClickDetail(udd);
   res.json({ success: true });
 });
 
@@ -80,7 +95,7 @@ app.get("/api/online-count", (req, res) => {
 });
 
 app.get("/api/stats", async (req, res) => {
-  const data = await fs.readJson(DATA_FILE).catch(() => ({ visits: {}, clicks: {} }));
+  const data = await fs.readJson(DATA_FILE).catch(() => ({ visits: {}, clicks: {}, clickLogs: {} }));
   res.json(data);
 });
 
